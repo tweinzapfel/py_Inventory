@@ -1,10 +1,15 @@
-﻿
 import streamlit as st
 import sqlite3
 import requests
 import cv2
 import numpy as np
-import pyzbar
+try:
+    from pyzbar.pyzbar import decode as pyzbar_decode
+except ImportError:
+    try:
+        from pyzbar import decode as pyzbar_decode
+    except ImportError:
+        pyzbar_decode = None
 from datetime import datetime, timedelta
 import pandas as pd
 from PIL import Image
@@ -135,6 +140,10 @@ def get_inventory():
 # Barcode scanning functions
 def decode_barcode_from_image(image):
     """Decode barcode from image array"""
+    if pyzbar_decode is None:
+        st.error("Barcode scanning library not available. Please use manual barcode entry.")
+        return None
+    
     # Convert PIL image to OpenCV format
     if isinstance(image, Image.Image):
         image = np.array(image)
@@ -144,10 +153,14 @@ def decode_barcode_from_image(image):
         image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
     
     # Decode barcodes
-    barcodes = pyzbar.decode(image)
+    try:
+        barcodes = pyzbar_decode(image)
+        
+        if barcodes:
+            return barcodes[0].data.decode('utf-8')
+    except Exception as e:
+        st.error(f"Error decoding barcode: {str(e)}")
     
-    if barcodes:
-        return barcodes[0].data.decode('utf-8')
     return None
 
 # Streamlit UI
