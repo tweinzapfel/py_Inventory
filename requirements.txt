@@ -1,6 +1,5 @@
 streamlit
 requests
-opencv-python-headless==4.8.1.78
-pyzbar==0.1.9
 pandas
 pillow
+pyzbar==0.1.9
