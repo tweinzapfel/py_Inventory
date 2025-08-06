@@ -1,14 +1,23 @@
 import streamlit as st
 import sqlite3
 import requests
-import cv2
+try:
+    import cv2
+    CV2_AVAILABLE = True
+except ImportError:
+    CV2_AVAILABLE = False
+
 import numpy as np
+
 try:
     from pyzbar.pyzbar import decode as pyzbar_decode
+    PYZBAR_AVAILABLE = True
 except ImportError:
     try:
         from pyzbar import decode as pyzbar_decode
+        PYZBAR_AVAILABLE = True
     except ImportError:
+        PYZBAR_AVAILABLE = False
         pyzbar_decode = None
 from datetime import datetime, timedelta
 import pandas as pd
@@ -140,26 +149,32 @@ def get_inventory():
 # Barcode scanning functions
 def decode_barcode_from_image(image):
     """Decode barcode from image array"""
-    if pyzbar_decode is None:
-        st.error("Barcode scanning library not available. Please use manual barcode entry.")
+    if not PYZBAR_AVAILABLE:
+        st.error("🚫 Barcode scanning library (pyzbar) is not available. Please use manual barcode entry.")
         return None
     
-    # Convert PIL image to OpenCV format
-    if isinstance(image, Image.Image):
-        image = np.array(image)
+    if not CV2_AVAILABLE:
+        st.error("🚫 Image processing library (opencv) is not available. Please use manual barcode entry.")
+        return None
     
-    # Convert RGB to BGR for OpenCV
-    if len(image.shape) == 3:
-        image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-    
-    # Decode barcodes
     try:
+        # Convert PIL image to OpenCV format
+        if isinstance(image, Image.Image):
+            image = np.array(image)
+        
+        # Convert RGB to BGR for OpenCV
+        if len(image.shape) == 3:
+            image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        
+        # Decode barcodes
         barcodes = pyzbar_decode(image)
         
         if barcodes:
             return barcodes[0].data.decode('utf-8')
+            
     except Exception as e:
-        st.error(f"Error decoding barcode: {str(e)}")
+        st.error(f"❌ Error decoding barcode: {str(e)}")
+        st.info("💡 Try using manual barcode entry instead.")
     
     return None
 
@@ -325,7 +340,16 @@ def main():
         if add_method == "📱 Scan Barcode":
             st.subheader("Scan Item Barcode")
             
-            # Camera input
+            # Show library status
+            if not PYZBAR_AVAILABLE or not CV2_AVAILABLE:
+                st.warning("⚠️ Barcode scanning is currently unavailable.")
+                if not PYZBAR_AVAILABLE:
+                    st.info("📋 Missing: pyzbar library")
+                if not CV2_AVAILABLE:
+                    st.info("📋 Missing: opencv library")
+                st.info("💡 Please use manual barcode entry below as an alternative.")
+            
+            # Camera input (show even if libraries unavailable for testing)
             st.write("Take a photo of the barcode:")
             camera_image = st.camera_input("Capture barcode", key="add_camera")
             
@@ -339,12 +363,15 @@ def main():
                 image = Image.open(camera_image)
                 st.image(image, caption="Captured Image", width=300)
                 
-                # Decode barcode
-                barcode = decode_barcode_from_image(image)
-                if barcode:
-                    st.success(f"✅ Barcode detected: {barcode}")
+                if PYZBAR_AVAILABLE and CV2_AVAILABLE:
+                    # Decode barcode
+                    barcode = decode_barcode_from_image(image)
+                    if barcode:
+                        st.success(f"✅ Barcode detected: {barcode}")
+                    else:
+                        st.error("❌ No barcode detected. Try taking another photo or enter manually.")
                 else:
-                    st.error("❌ No barcode detected. Try taking another photo or enter manually.")
+                    st.info("📝 Barcode scanning unavailable. Please enter the barcode number manually below.")
             
             if manual_barcode:
                 barcode = manual_barcode
@@ -453,6 +480,11 @@ def main():
         if use_method == "📱 Scan Barcode":
             st.subheader("Scan Item Barcode")
             
+            # Show library status
+            if not PYZBAR_AVAILABLE or not CV2_AVAILABLE:
+                st.warning("⚠️ Barcode scanning is currently unavailable.")
+                st.info("💡 Please use 'Select from List' option above or manual barcode entry below.")
+            
             # Camera input
             st.write("Take a photo of the barcode:")
             camera_image = st.camera_input("Capture barcode", key="use_camera")
@@ -467,12 +499,15 @@ def main():
                 image = Image.open(camera_image)
                 st.image(image, caption="Captured Image", width=300)
                 
-                # Decode barcode
-                barcode = decode_barcode_from_image(image)
-                if barcode:
-                    st.success(f"✅ Barcode detected: {barcode}")
+                if PYZBAR_AVAILABLE and CV2_AVAILABLE:
+                    # Decode barcode
+                    barcode = decode_barcode_from_image(image)
+                    if barcode:
+                        st.success(f"✅ Barcode detected: {barcode}")
+                    else:
+                        st.error("❌ No barcode detected. Try taking another photo or enter manually.")
                 else:
-                    st.error("❌ No barcode detected. Try taking another photo or enter manually.")
+                    st.info("📝 Barcode scanning unavailable. Please enter the barcode number manually below.")
             
             if manual_barcode:
                 barcode = manual_barcode
