@@ -177,60 +177,191 @@ def main():
     
     st.title("🏠 Pantry Inventory Tracker")
     
-    # Sidebar navigation
-    st.sidebar.title("Navigation")
-    page = st.sidebar.selectbox(
-        "Choose Action",
-        ["📱 Scan Barcode", "📦 View Inventory", "➕ Manual Add", "📊 Statistics"]
-    )
+    # Main tab navigation
+    tab1, tab2, tab3, tab4 = st.tabs(["📦 Current Inventory", "➕ Add Items", "➖ Use Items", "📊 Statistics"])
     
-    if page == "📱 Scan Barcode":
-        st.header("Scan Item Barcode")
+    with tab1:
+        st.header("Your Pantry Inventory")
         
-        # Action selection
-        action = st.radio(
-            "What do you want to do?",
-            ["Add to Inventory", "Use from Inventory"],
+        df = get_inventory()
+        
+        if not df.empty:
+            # Summary stats at top
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Total Items", len(df[df['quantity'] > 0]))
+            with col2:
+                st.metric("Total Products", len(df))
+            with col3:
+                st.metric("Low Stock", len(df[df['quantity'] <= 2]))
+            with col4:
+                st.metric("Out of Stock", len(df[df['quantity'] == 0]))
+            
+            st.divider()
+            
+            # Filter options
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                show_empty = st.checkbox("Show out of stock items", value=True)
+            with col2:
+                category_filter = st.selectbox(
+                    "Filter by category:",
+                    ["All"] + sorted(list(df['category'].unique()))
+                )
+            with col3:
+                sort_by = st.selectbox(
+                    "Sort by:",
+                    ["Last Updated", "Product Name", "Quantity", "Expiry Date"]
+                )
+            
+            # Apply filters
+            filtered_df = df.copy()
+            if not show_empty:
+                filtered_df = filtered_df[filtered_df['quantity'] > 0]
+            if category_filter != "All":
+                filtered_df = filtered_df[filtered_df['category'] == category_filter]
+            
+            # Apply sorting
+            if sort_by == "Product Name":
+                filtered_df = filtered_df.sort_values('product_name')
+            elif sort_by == "Quantity":
+                filtered_df = filtered_df.sort_values('quantity', ascending=False)
+            elif sort_by == "Expiry Date":
+                filtered_df = filtered_df.sort_values('expiry_date', na_last=True)
+            else:  # Last Updated
+                filtered_df = filtered_df.sort_values('last_updated', ascending=False)
+            
+            st.subheader(f"Items ({len(filtered_df)})")
+            
+            # Display inventory in a more organized way
+            if len(filtered_df) > 0:
+                for _, item in filtered_df.iterrows():
+                    with st.container():
+                        col1, col2, col3, col4, col5 = st.columns([4, 1, 1, 1, 1])
+                        
+                        with col1:
+                            # Product name and brand
+                            if item['quantity'] == 0:
+                                st.markdown(f"**{item['product_name']}** ⚠️ *OUT OF STOCK*")
+                            elif item['quantity'] <= 2:
+                                st.markdown(f"**{item['product_name']}** ⚠️ *LOW STOCK*")
+                            else:
+                                st.markdown(f"**{item['product_name']}**")
+                            
+                            st.caption(f"Brand: {item['brand']} | Category: {item['category']}")
+                            
+                            # Expiry information
+                            if item['expiry_date']:
+                                try:
+                                    expiry = datetime.fromisoformat(item['expiry_date'])
+                                    days_to_expiry = (expiry.date() - datetime.now().date()).days
+                                    if days_to_expiry < 0:
+                                        st.error(f"🚨 Expired {abs(days_to_expiry)} days ago")
+                                    elif days_to_expiry <= 7:
+                                        st.warning(f"⏰ Expires in {days_to_expiry} days")
+                                    else:
+                                        st.info(f"📅 Expires: {expiry.strftime('%m/%d/%Y')}")
+                                except:
+                                    pass
+                        
+                        with col2:
+                            # Quantity with color coding
+                            if item['quantity'] == 0:
+                                st.metric("Qty", "0", delta=None)
+                            elif item['quantity'] <= 2:
+                                st.metric("Qty", item['quantity'], delta="Low")
+                            else:
+                                st.metric("Qty", item['quantity'])
+                        
+                        with col3:
+                            # Product image
+                            if item['image_url']:
+                                try:
+                                    st.image(item['image_url'], width=60)
+                                except:
+                                    st.markdown("📦")
+                            else:
+                                st.markdown("📦")
+                        
+                        with col4:
+                            # Quick add button
+                            if st.button("➕", key=f"add_{item['id']}", help="Add one more"):
+                                add_to_inventory(item['barcode'], {
+                                    'name': item['product_name'],
+                                    'brand': item['brand'],
+                                    'image_url': item['image_url'],
+                                    'category': item['category']
+                                }, 1)
+                                st.rerun()
+                        
+                        with col5:
+                            # Quick use button
+                            if item['quantity'] > 0:
+                                if st.button("➖", key=f"use_{item['id']}", help="Use one"):
+                                    remove_from_inventory(item['barcode'], 1)
+                                    st.rerun()
+                            else:
+                                st.write("")
+                        
+                        st.divider()
+            else:
+                st.info("No items match your current filters.")
+        else:
+            st.info("🛒 Your pantry is empty! Use the 'Add Items' tab to start tracking your inventory.")
+            st.markdown("### Get Started:")
+            st.markdown("- Use the **Add Items** tab to scan barcodes or manually add products")
+            st.markdown("- Use the **Use Items** tab when you consume something from your pantry")
+    
+    with tab2:
+        st.header("Add Items to Inventory")
+        
+        # Method selection
+        add_method = st.radio(
+            "How would you like to add items?",
+            ["📱 Scan Barcode", "✏️ Manual Entry"],
             horizontal=True
         )
         
-        # Camera input
-        st.subheader("Take a photo of the barcode")
-        camera_image = st.camera_input("Capture barcode")
-        
-        # Manual barcode input as fallback
-        manual_barcode = st.text_input("Or enter barcode manually:")
-        
-        barcode = None
-        
-        if camera_image is not None:
-            # Process camera image
-            image = Image.open(camera_image)
-            st.image(image, caption="Captured Image", width=300)
+        if add_method == "📱 Scan Barcode":
+            st.subheader("Scan Item Barcode")
             
-            # Decode barcode
-            barcode = decode_barcode_from_image(image)
+            # Camera input
+            st.write("Take a photo of the barcode:")
+            camera_image = st.camera_input("Capture barcode", key="add_camera")
+            
+            # Manual barcode input as fallback
+            manual_barcode = st.text_input("Or enter barcode manually:", key="add_manual_barcode")
+            
+            barcode = None
+            
+            if camera_image is not None:
+                # Process camera image
+                image = Image.open(camera_image)
+                st.image(image, caption="Captured Image", width=300)
+                
+                # Decode barcode
+                barcode = decode_barcode_from_image(image)
+                if barcode:
+                    st.success(f"✅ Barcode detected: {barcode}")
+                else:
+                    st.error("❌ No barcode detected. Try taking another photo or enter manually.")
+            
+            if manual_barcode:
+                barcode = manual_barcode
+                st.info(f"Using barcode: {barcode}")
+            
             if barcode:
-                st.success(f"Barcode detected: {barcode}")
-            else:
-                st.error("No barcode detected. Try taking another photo or enter manually.")
-        
-        if manual_barcode:
-            barcode = manual_barcode
-            st.info(f"Using manual barcode: {barcode}")
-        
-        if barcode:
-            if action == "Add to Inventory":
-                st.subheader("Add Item to Inventory")
+                st.subheader("Product Information")
                 
                 # Lookup product information
-                with st.spinner("Looking up product information..."):
+                with st.spinner("🔍 Looking up product information..."):
                     product_info = lookup_product(barcode)
                 
                 if product_info:
-                    col1, col2 = st.columns([2, 1])
+                    col1, col2 = st.columns([3, 1])
                     
                     with col1:
+                        st.success("✅ Product found!")
                         st.write(f"**Product:** {product_info['name']}")
                         st.write(f"**Brand:** {product_info['brand']}")
                         st.write(f"**Category:** {product_info['category']}")
@@ -240,36 +371,114 @@ def main():
                             try:
                                 st.image(product_info['image_url'], width=150)
                             except:
-                                st.write("Image not available")
+                                st.write("📦")
                     
                     # Quantity and expiry inputs
                     col1, col2 = st.columns(2)
                     with col1:
-                        quantity = st.number_input("Quantity to add:", min_value=1, value=1)
+                        quantity = st.number_input("Quantity to add:", min_value=1, value=1, key="scan_quantity")
                     with col2:
-                        expiry_date = st.date_input("Expiry date (optional):")
+                        expiry_date = st.date_input("Expiry date (optional):", value=None, key="scan_expiry")
                     
-                    if st.button("Add to Inventory", type="primary"):
+                    if st.button("🛒 Add to Inventory", type="primary", key="scan_add_btn"):
                         expiry_str = expiry_date.isoformat() if expiry_date else None
                         add_to_inventory(barcode, product_info, quantity, expiry_str)
                         st.rerun()
                 else:
-                    st.warning("Product not found in database. You can still add it manually.")
+                    st.warning("⚠️ Product not found in database. You can add it manually below:")
+                    with st.form("unknown_product_form"):
+                        product_name = st.text_input("Product Name:", key="unknown_name")
+                        brand = st.text_input("Brand:", key="unknown_brand")
+                        category = st.text_input("Category:", key="unknown_category")
+                        quantity = st.number_input("Quantity:", min_value=1, value=1, key="unknown_quantity")
+                        expiry_date = st.date_input("Expiry Date (optional):", value=None, key="unknown_expiry")
+                        
+                        submitted = st.form_submit_button("🛒 Add to Inventory", type="primary")
+                        
+                        if submitted and product_name:
+                            product_info = {
+                                'name': product_name,
+                                'brand': brand or 'Unknown Brand',
+                                'image_url': '',
+                                'category': category or 'Unknown Category'
+                            }
+                            expiry_str = expiry_date.isoformat() if expiry_date else None
+                            add_to_inventory(barcode, product_info, quantity, expiry_str)
+                            st.success("✅ Item added successfully!")
+                            st.rerun()
+        
+        else:  # Manual Entry
+            st.subheader("Manual Product Entry")
+            
+            with st.form("manual_add_form"):
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    barcode = st.text_input("Barcode:", help="Enter the barcode number")
                     product_name = st.text_input("Product Name:")
                     brand = st.text_input("Brand:")
+                
+                with col2:
+                    category = st.text_input("Category:", placeholder="e.g., Snacks, Beverages, Dairy")
                     quantity = st.number_input("Quantity:", min_value=1, value=1)
-                    
-                    if st.button("Add to Inventory") and product_name:
+                    expiry_date = st.date_input("Expiry Date (optional):", value=None)
+                
+                submitted = st.form_submit_button("🛒 Add to Inventory", type="primary")
+                
+                if submitted:
+                    if barcode and product_name:
                         product_info = {
                             'name': product_name,
-                            'brand': brand,
+                            'brand': brand or 'Unknown Brand',
                             'image_url': '',
-                            'category': 'Manual Entry'
+                            'category': category or 'Manual Entry'
                         }
-                        add_to_inventory(barcode, product_info, quantity)
+                        expiry_str = expiry_date.isoformat() if expiry_date else None
+                        add_to_inventory(barcode, product_info, quantity, expiry_str)
+                        st.success("✅ Item added successfully!")
                         st.rerun()
+                    else:
+                        st.error("❌ Please enter both barcode and product name.")
+    
+    with tab3:
+        st.header("Use Items from Inventory")
+        
+        # Method selection
+        use_method = st.radio(
+            "How would you like to select items?",
+            ["📱 Scan Barcode", "📋 Select from List"],
+            horizontal=True
+        )
+        
+        if use_method == "📱 Scan Barcode":
+            st.subheader("Scan Item Barcode")
             
-            elif action == "Use from Inventory":
+            # Camera input
+            st.write("Take a photo of the barcode:")
+            camera_image = st.camera_input("Capture barcode", key="use_camera")
+            
+            # Manual barcode input as fallback
+            manual_barcode = st.text_input("Or enter barcode manually:", key="use_manual_barcode")
+            
+            barcode = None
+            
+            if camera_image is not None:
+                # Process camera image
+                image = Image.open(camera_image)
+                st.image(image, caption="Captured Image", width=300)
+                
+                # Decode barcode
+                barcode = decode_barcode_from_image(image)
+                if barcode:
+                    st.success(f"✅ Barcode detected: {barcode}")
+                else:
+                    st.error("❌ No barcode detected. Try taking another photo or enter manually.")
+            
+            if manual_barcode:
+                barcode = manual_barcode
+                st.info(f"Using barcode: {barcode}")
+            
+            if barcode:
                 st.subheader("Use Item from Inventory")
                 
                 # Check if item exists in inventory
@@ -281,118 +490,76 @@ def main():
                 
                 if result:
                     product_name, current_quantity = result
-                    st.write(f"**Product:** {product_name}")
-                    st.write(f"**Current Quantity:** {current_quantity}")
                     
-                    use_quantity = st.number_input(
-                        "Quantity to use:", 
-                        min_value=1, 
-                        max_value=current_quantity, 
-                        value=1
-                    )
-                    
-                    if st.button("Use Item", type="primary"):
-                        remove_from_inventory(barcode, use_quantity)
-                        st.rerun()
-                else:
-                    st.error("Item not found in inventory!")
-    
-    elif page == "📦 View Inventory":
-        st.header("Current Inventory")
-        
-        df = get_inventory()
-        
-        if not df.empty:
-            # Summary stats
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Total Items", len(df))
-            with col2:
-                st.metric("Low Stock Items", len(df[df['quantity'] <= 2]))
-            with col3:
-                st.metric("Out of Stock", len(df[df['quantity'] == 0]))
-            
-            # Filter options
-            st.subheader("Filters")
-            col1, col2 = st.columns(2)
-            with col1:
-                show_empty = st.checkbox("Show out of stock items")
-            with col2:
-                category_filter = st.selectbox(
-                    "Filter by category:",
-                    ["All"] + list(df['category'].unique())
-                )
-            
-            # Apply filters
-            filtered_df = df.copy()
-            if not show_empty:
-                filtered_df = filtered_df[filtered_df['quantity'] > 0]
-            if category_filter != "All":
-                filtered_df = filtered_df[filtered_df['category'] == category_filter]
-            
-            # Display inventory
-            for _, item in filtered_df.iterrows():
-                with st.container():
-                    col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
-                    
+                    col1, col2 = st.columns(2)
                     with col1:
-                        st.write(f"**{item['product_name']}**")
-                        st.write(f"Brand: {item['brand']}")
-                        if item['expiry_date']:
-                            expiry = datetime.fromisoformat(item['expiry_date'])
-                            days_to_expiry = (expiry.date() - datetime.now().date()).days
-                            if days_to_expiry < 0:
-                                st.error(f"Expired {abs(days_to_expiry)} days ago")
-                            elif days_to_expiry <= 7:
-                                st.warning(f"Expires in {days_to_expiry} days")
+                        st.success(f"✅ Found: **{product_name}**")
+                        st.write(f"**Current Stock:** {current_quantity}")
+                    
+                    if current_quantity > 0:
+                        use_quantity = st.number_input(
+                            "Quantity to use:", 
+                            min_value=1, 
+                            max_value=current_quantity, 
+                            value=1,
+                            key="scan_use_quantity"
+                        )
+                        
+                        if st.button("✅ Use Item", type="primary", key="scan_use_btn"):
+                            remove_from_inventory(barcode, use_quantity)
+                            st.rerun()
+                    else:
+                        st.error("❌ This item is out of stock!")
+                else:
+                    st.error("❌ Item not found in inventory!")
+        
+        else:  # Select from List
+            st.subheader("Select Item from Your Inventory")
+            
+            df = get_inventory()
+            available_items = df[df['quantity'] > 0]
+            
+            if not available_items.empty:
+                # Create a selectbox with available items
+                item_options = {}
+                for _, item in available_items.iterrows():
+                    display_name = f"{item['product_name']} ({item['brand']}) - Stock: {item['quantity']}"
+                    item_options[display_name] = {
+                        'barcode': item['barcode'],
+                        'name': item['product_name'],
+                        'quantity': item['quantity']
+                    }
+                
+                selected_display = st.selectbox(
+                    "Choose an item to use:",
+                    options=list(item_options.keys()),
+                    key="list_select_item"
+                )
+                
+                if selected_display:
+                    selected_item = item_options[selected_display]
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        use_quantity = st.number_input(
+                            "Quantity to use:",
+                            min_value=1,
+                            max_value=selected_item['quantity'],
+                            value=1,
+                            key="list_use_quantity"
+                        )
                     
                     with col2:
-                        st.metric("Quantity", item['quantity'])
-                    
-                    with col3:
-                        if item['image_url']:
-                            try:
-                                st.image(item['image_url'], width=80)
-                            except:
-                                st.write("📦")
-                        else:
-                            st.write("📦")
-                    
-                    with col4:
-                        if st.button(f"Remove", key=f"remove_{item['id']}"):
-                            remove_from_inventory(item['barcode'], 1)
+                        st.write("")  # Empty space for alignment
+                        st.write("")  # Empty space for alignment
+                        if st.button("✅ Use Selected Item", type="primary", key="list_use_btn"):
+                            remove_from_inventory(selected_item['barcode'], use_quantity)
                             st.rerun()
-                    
-                    st.divider()
-        else:
-            st.info("Your inventory is empty. Start by scanning some items!")
+            else:
+                st.info("📭 No items available to use. Add some items first!")
     
-    elif page == "➕ Manual Add":
-        st.header("Manually Add Item")
-        
-        with st.form("manual_add_form"):
-            barcode = st.text_input("Barcode:")
-            product_name = st.text_input("Product Name:")
-            brand = st.text_input("Brand:")
-            quantity = st.number_input("Quantity:", min_value=1, value=1)
-            category = st.text_input("Category:")
-            expiry_date = st.date_input("Expiry Date (optional):")
-            
-            submitted = st.form_submit_button("Add to Inventory")
-            
-            if submitted and barcode and product_name:
-                product_info = {
-                    'name': product_name,
-                    'brand': brand,
-                    'image_url': '',
-                    'category': category or 'Manual Entry'
-                }
-                expiry_str = expiry_date.isoformat() if expiry_date else None
-                add_to_inventory(barcode, product_info, quantity, expiry_str)
-                st.success("Item added successfully!")
-    
-    elif page == "📊 Statistics":
-        st.header("Inventory Statistics")
+    with tab4:
+        st.header("Inventory Statistics & Insights")
         
         df = get_inventory()
         
